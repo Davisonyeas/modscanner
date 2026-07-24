@@ -23,6 +23,7 @@ keywords = [
     "industrial-automation",
     "plc",
     "scada",
+    "automation",
 ]
 
 classifiers = [
