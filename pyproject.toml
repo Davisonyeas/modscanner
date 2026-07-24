@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "modscanner"
+version = "0.1.0"
+description = "A safety-first Modbus discovery and register inspection toolkit."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+
+authors = [
+    { name = "Davis Onyeoguzoro" },
+]
+
+keywords = [
+    "modbus",
+    "modbus-tcp",
+    "modbus-rtu",
+    "industrial-automation",
+    "plc",
+    "scada",
+]
+
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Manufacturing",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "pymodbus>=3.14,<3.15",
+    "rich>=13,<15",
+    "typer>=0.12,<1",
+]
+
+
+[project.scripts]
+modscanner = "modscanner.cli:app"
+
+
+[project.urls]
+Homepage = "https://github.com/davisonyeas/modscanner"
+Documentation = "https://davisonyeas.github.io/modscanner/"
+Repository = "https://github.com/davisonyeas/modscanner"
+Issues = "https://github.com/davisonyeas/modscanner/issues"
+Changelog = "https://github.com/davisonyeas/modscanner/blob/main/CHANGELOG.md"
+
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+
+[tool.setuptools.package-data]
+modscanner = ["py.typed"]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.22",
+    "twine>=6.2.0",
+]
