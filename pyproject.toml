@@ -31,11 +31,9 @@ classifiers = [
     "Intended Audience :: Manufacturing",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.15",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
@@ -55,7 +53,7 @@ Homepage = "https://github.com/davisonyeas/modscanner"
 Documentation = "https://davisonyeas.github.io/modscanner/"
 Repository = "https://github.com/davisonyeas/modscanner"
 Issues = "https://github.com/davisonyeas/modscanner/issues"
-Changelog = "https://github.com/davisonyeas/modscanner/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/davisonyeas/modscanner/blob/master/CHANGELOG.md"
 
 
 [tool.setuptools.packages.find]
