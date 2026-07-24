@@ -1,4 +1,4 @@
-'''unit tests for adaptive holding-register scanning'''
+"""unit tests for adaptive holding-register scanning"""
 
 from modscanner.models import (
     ResultStatus,
@@ -13,7 +13,7 @@ from modscanner.transports.base import (
 
 
 class SparseRegisterTransport:
-    '''fake transport where only addresses 8 and 9 are valid'''
+    """fake transport where only addresses 8 and 9 are valid"""
 
     def __init__(self) -> None:
         self.calls: list[tuple[int, int, int]] = []
@@ -33,7 +33,9 @@ class SparseRegisterTransport:
         self.calls.append((address, count, device_id))
 
         if address >= 8 and address + count <= 10:
-            values = tuple(1_000 + current for current in range(address, address + count))
+            values = tuple(
+                1_000 + current for current in range(address, address + count)
+            )
             return BlockRead.success(values)
 
         return BlockRead.failure(
@@ -41,8 +43,9 @@ class SparseRegisterTransport:
             "Illegal data address",
         )
 
+
 class FailedTransport:
-    '''fake transport representing an unavailable connection'''
+    """fake transport representing an unavailable connection"""
 
     def __init__(self) -> None:
         self.call_count = 0
@@ -65,6 +68,7 @@ class FailedTransport:
             ReadErrorKind.TRANSPORT,
             "Connection timed out",
         )
+
 
 def test_scanner_identifies_valid_addresses_inside_rejected_block() -> None:
     target = TcpTarget(
@@ -94,8 +98,7 @@ def test_scanner_identifies_valid_addresses_inside_rejected_block() -> None:
     assert report.results[1].status is ResultStatus.OK
 
     assert all(
-        result.status is ResultStatus.PROTOCOL_ERROR
-        for result in report.results[2:]
+        result.status is ResultStatus.PROTOCOL_ERROR for result in report.results[2:]
     )
 
     assert len(transport.calls) > 1
@@ -121,6 +124,5 @@ def test_transport_error_does_not_trigger_recursive_requests() -> None:
     assert report.failed_count == 20
 
     assert all(
-        result.status is ResultStatus.TRANSPORT_ERROR
-        for result in report.results
+        result.status is ResultStatus.TRANSPORT_ERROR for result in report.results
     )
