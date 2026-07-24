@@ -8,7 +8,8 @@ name = "modscanner"
 version = "0.1.0"
 description = "A safety-first Modbus discovery and register inspection toolkit."
 readme = "README.md"
-requires-python = ">=3.11"
+#requires-python = ">=3.11"
+requires-python = ">=3.9" # Allow any version of Python 3.9 and above
 license = "MIT"
 license-files = ["LICENSE"]
 
@@ -31,10 +32,11 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Manufacturing",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3 :: Only", # Explicitly allow only Python 3 and no Python 2
+#    "Programming Language :: Python :: 3.11",
+#    "Programming Language :: Python :: 3.12",
+#    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
@@ -51,11 +53,12 @@ modscanner = "modscanner.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/davisonyeas/modscanner"
-Documentation = "https://davisonyeas.github.io/modscanner/"
+# Documentation = "https://davisonyeas.github.io/modscanner/"
+Documentation = "https://github.com/Davisonyeas/modscanner"
 Repository = "https://github.com/davisonyeas/modscanner"
 Issues = "https://github.com/davisonyeas/modscanner/issues"
 Changelog = "https://github.com/davisonyeas/modscanner/blob/master/CHANGELOG.md"
-
+Source = "https://github.com/davisonyeas/modscanner"
 
 [tool.setuptools.packages.find]
 where = ["src"]
