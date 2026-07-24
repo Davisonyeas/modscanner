@@ -122,6 +122,9 @@ Version 0.1.0 does not yet support:
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
+## Package PyPI
+Visit [https://pypi.org/project/modscanner/](https://pypi.org/project/modscanner/)
+
 ## Security
 
 Do not use ModScanner to perform unauthorized scanning or testing.
