@@ -1,14 +1,15 @@
-'''rich terminal output for ModScanner reports'''
+"""rich terminal output for ModScanner reports"""
 
 from rich.console import Console
 from rich.table import Table
 from modscanner.models import ScanReport
 
+
 def render_report(
     report: ScanReport,
     console: Console | None = None,
 ) -> None:
-    '''render a scan report as a terminal table'''
+    """render a scan report as a terminal table"""
 
     output = console or Console()
 
@@ -35,6 +36,5 @@ def render_report(
 
     output.print(table)
     output.print(
-        f"Successful: {report.successful_count} | "
-        f"Failed: {report.failed_count}"
+        f"Successful: {report.successful_count} | Failed: {report.failed_count}"
     )

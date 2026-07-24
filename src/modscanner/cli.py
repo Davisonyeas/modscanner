@@ -1,4 +1,4 @@
-'''command-line interface for ModScanner'''
+"""command-line interface for ModScanner"""
 
 import typer
 from rich.console import Console
@@ -14,10 +14,11 @@ app = typer.Typer(
     name="modscanner",
     help="safely discover and inspect Modbus devices via RTU and TCP.",
     no_args_is_help=True,
-    context_settings={"help_option_names" : ["--help", "--h", "-help", "--h"]}
+    context_settings={"help_option_names": ["--help", "--h", "-help", "--h"]},
 )
 
 console = Console()
+
 
 @app.command("scan-tcp")
 def scan_tcp(
@@ -103,13 +104,15 @@ def scan_tcp(
 
     render_report(report, console)
 
+
 @app.command()
 def version() -> None:
-    '''display the installed ModScanner version'''
+    """display the installed ModScanner version"""
 
     from modscanner import __version__
 
     console.print(f"modscanner {__version__}")
+
 
 if __name__ == "__main__":
     app()

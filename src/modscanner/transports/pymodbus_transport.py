@@ -1,4 +1,4 @@
-'''PyModbus-backed Modbus TCP transport'''
+"""PyModbus-backed Modbus TCP transport"""
 
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
@@ -6,8 +6,9 @@ from modscanner.exceptions import ModScannerConnectionError
 from modscanner.models import TcpTarget
 from modscanner.transports.base import BlockRead, ReadErrorKind
 
+
 class PymodbusTcpTransport:
-    '''synchronous Modbus TCP transport using PyModbus'''
+    """synchronous Modbus TCP transport using PyModbus"""
 
     def __init__(self, target: TcpTarget) -> None:
         self._target = target
@@ -18,24 +19,22 @@ class PymodbusTcpTransport:
         )
 
     def connect(self) -> None:
-        '''connect to the configured Modbus TCP device'''
+        """connect to the configured Modbus TCP device"""
 
         try:
             connected = self._client.connect()
         except (ModbusException, OSError, TimeoutError) as exc:
             raise ModScannerConnectionError(
-                f"could not connect to "
-                f"{self._target.host}:{self._target.port}: {exc}"
+                f"could not connect to {self._target.host}:{self._target.port}: {exc}"
             ) from exc
 
         if not connected:
             raise ModScannerConnectionError(
-                f"could not connect to "
-                f"{self._target.host}:{self._target.port}"
+                f"could not connect to {self._target.host}:{self._target.port}"
             )
 
     def close(self) -> None:
-        '''close the PyModbus TCP connection'''
+        """close the PyModbus TCP connection"""
 
         self._client.close()
 
@@ -45,8 +44,8 @@ class PymodbusTcpTransport:
         count: int,
         device_id: int,
     ) -> BlockRead:
-        '''read holding registers using function code 03'''
-    
+        """read holding registers using function code 03"""
+
         try:
             response = self._client.read_holding_registers(
                 address,

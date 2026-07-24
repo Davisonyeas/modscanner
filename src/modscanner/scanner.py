@@ -1,4 +1,4 @@
-'''read-only Modbus register scanning logic'''
+"""read-only Modbus register scanning logic"""
 
 from modscanner.models import (
     RegisterArea,
@@ -15,7 +15,7 @@ from modscanner.transports.base import (
 
 
 class Scanner:
-    '''read-only Modbus scanner'''
+    """read-only Modbus scanner"""
 
     def __init__(
         self,
@@ -26,7 +26,7 @@ class Scanner:
         self._target = target
 
     def scan_holding_registers(self, plan: ScanPlan) -> ScanReport:
-        '''scan holding registers using adaptive block splitting'''
+        """scan holding registers using adaptive block splitting"""
 
         results: list[RegisterResult] = []
 

@@ -1,4 +1,4 @@
-'''modScanner public package interface'''
+"""modScanner public package interface"""
 
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version
