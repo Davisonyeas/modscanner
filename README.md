@@ -24,7 +24,7 @@ Early development. Version 0.1.0 supports only
 
 Install ModScanner from PyPI using either of two(2) methods the below:
 
-1. Install ModScanner from PyPI:
+1. Using pip:
 
 ```bash
 pip install modscanner
