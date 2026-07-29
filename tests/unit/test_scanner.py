@@ -69,7 +69,6 @@ class FailedTransport:
             "Connection timed out",
         )
 
-
 def test_scanner_identifies_valid_addresses_inside_rejected_block() -> None:
     target = TcpTarget(
         host="127.0.0.1",
