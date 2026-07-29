@@ -7,3 +7,6 @@ class ModScannerError(Exception):
 
 class ModScannerConnectionError(Exception):
     """raised when a Modbus connection cannot be establised"""
+
+class ModbusException(Exception):
+    """try basic holding register, device info is not supported"""

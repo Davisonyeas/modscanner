@@ -6,7 +6,6 @@ from modscanner.exceptions import ModScannerConnectionError
 from modscanner.models import TcpTarget
 from modscanner.transports.base import BlockRead, ReadErrorKind
 
-
 class PymodbusTcpTransport:
     """synchronous Modbus TCP transport using PyModbus"""
 
@@ -23,6 +22,7 @@ class PymodbusTcpTransport:
 
         try:
             connected = self._client.connect()
+        
         except (ModbusException, OSError, TimeoutError) as exc:
             raise ModScannerConnectionError(
                 f"could not connect to {self._target.host}:{self._target.port}: {exc}"
@@ -32,6 +32,29 @@ class PymodbusTcpTransport:
             raise ModScannerConnectionError(
                 f"could not connect to {self._target.host}:{self._target.port}"
             )
+
+    def read_device_information(self, slave_id):
+        try:
+            client = self._client
+
+            resp = client.read_device_information(read_code=1, object_id=0, slave=slave_id)
+
+            if not resp.isError():
+                info = resp.info.information.get(0, b"Unknown").decode("utf-8", errors="ignore")
+                return info
+
+        except ModbusException:
+            try:
+                resp = client.read_holding_registers(address=0, count=1, slave_id=slave_id)
+
+                if not resp.isError():
+                    return "Active Modbus Device Identity Hidden"
+
+            except Exception as e:
+                print(f"error: {e}")
+
+            finally:
+                client.close()
 
     def close(self) -> None:
         """close the PyModbus TCP connection"""
