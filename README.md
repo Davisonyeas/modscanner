@@ -19,6 +19,8 @@ Early development. Version 0.1.0 supports only
 - Typed Python data module
 - Transport abstraction that is built untop of PyModbus
 - Unit tested scanning behavior
+- Scan all devices on your network that uses Modbus
+- Show the slave ID of the Modbus devices
 
 ## Installation
 
@@ -51,7 +53,18 @@ modscanner version
 
 There are different ways to use the library;
 
-1. Scan holding registers `0` through `19` on a Modbus TCP device using the below:
+### 1. Scan holding registers
+
+1. Quick Scan of 10 registers:
+
+```bash
+modscanner scan-tcp 192.168.1.10 --port 502
+```
+
+Result:
+![ModScanner network discovery example](docs/images/modscanner_tcp_hr_scan_result.png)
+
+2. Scan holding registers `0` through `19` on a Modbus TCP device using the below:
 
 ```bash
 modscanner scan-tcp 192.168.1.10 --device-id 1 --start 0 --count 20
@@ -59,7 +72,7 @@ modscanner scan-tcp 192.168.1.10 --device-id 1 --start 0 --count 20
 
 > **The above expects you to use the IP Address of the Modbus device, so replace the 192.168.1.10 with your Modbus device**
 
-2. Specify the TCP port, timeout, and request block size using:
+3. Specify the TCP port, timeout, and request block size using:
 
 ```bash
 modscanner scan-tcp 192.168.1.10 --port 502 --device-id 1 --start 0 --count 100 --block-size 50 --timeout 2
@@ -68,6 +81,31 @@ modscanner scan-tcp 192.168.1.10 --port 502 --device-id 1 --start 0 --count 100 
 Run:
 ```bash
 modscanner scan-tcp --help
+```
+
+to see all available options.
+
+### 2. Show all devices on your network using Modbus including the slave ID
+
+1. Scan all the devices on your network, and display the devices that are running Modbus:
+
+```bash
+modscanner scan-network --subnet 192.168.2.0/24
+```
+
+The above shows the list of all devices running Modbus. 
+
+> **Note: You can also get the vendor names, so that you can know what Modbus device has what IP Address. To get the vendor names, root privledge is required, run the below code;
+
+```bash
+modscanner scan-network --subnet 192.168.2.0/24 --show-vendor
+```
+
+> ***After running the above for the first time, you will be prompted to enter your admin password.
+
+Run:
+```bash
+modscanner scan-network --help
 ```
 
 to see all available options.
