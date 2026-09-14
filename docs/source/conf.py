@@ -25,7 +25,7 @@ html_theme = "sphinx_rtd_theme"
 
 html_title = f"ModScanner {release}"
 
-html_static_path = ["_static"]
+# html_static_path = ["_static"]
 
 autodoc_typehints = "description"
 autodoc_member_order = "bysource"
