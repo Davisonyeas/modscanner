@@ -8,7 +8,7 @@ from modscanner.models import (
 from modscanner.scanner import Scanner
 from modscanner.transports.base import (
     BlockRead,
-    ReadErrorKind,
+    OperationErrorKind,
 )
 
 
@@ -39,7 +39,7 @@ class SparseRegisterTransport:
             return BlockRead.success(values)
 
         return BlockRead.failure(
-            ReadErrorKind.PROTOCOL,
+            OperationErrorKind.PROTOCOL,
             "Illegal data address",
         )
 
@@ -65,7 +65,7 @@ class FailedTransport:
         self.call_count += 1
 
         return BlockRead.failure(
-            ReadErrorKind.TRANSPORT,
+            OperationErrorKind.TRANSPORT,
             "Connection timed out",
         )
 

@@ -1,106 +1,374 @@
-"""command-line interface for ModScanner"""
+"""Command-line interface for ModScanner."""
 
-import os
-import sys
-import nmap
-import typer
-import psutil
-import socket
 import ipaddress
-
-from rich.console import Console
-from modscanner.exceptions import ModScannerConnectionError, ModbusException
-from modscanner.models import ScanPlan, TcpTarget
-from modscanner.reporters.console import render_report
-from modscanner.scanner import Scanner
-from modscanner.transports.pymodbus_transport import (
-    PymodbusTcpTransport,
-)
-
+import os
+import socket
+import sys
+from typing import Any, cast
+import nmap
+import psutil
+import typer
 from nmap import PortScannerError, PortScannerTimeout
-
 from rich.console import Console
 from rich.table import Table
 
+from modscanner.exceptions import ModScannerConnectionError
+from modscanner.models import RegisterArea, ScanPlan, TcpTarget
+from modscanner.reporters.console import render_report
+from modscanner.scanner import Scanner
+from modscanner.transports.base import WriteResult
+from modscanner.transports.pymodbus_transport import PymodbusTcpTransport
+from modscanner.writer import Writer
+
 app = typer.Typer(
     name="modscanner",
-    help="safely discover and inspect Modbus devices via RTU and TCP.",
+    help="Discover, inspect, and interact with Modbus TCP devices.",
     no_args_is_help=True,
-    context_settings={"help_option_names": ["--help", "--h", "-help", "--h"]},
+    context_settings={
+        "help_option_names": ["--help", "-h"],
+    },
 )
 
-PORT = 502
-TIMEOUT = 0.5
-COMMON_SLAVE_IDS = [1, ]
+scan_app = typer.Typer(
+    help="Read and scan Modbus data areas.",
+    no_args_is_help=True,
+)
 
-FOUND_MODBUS_DEVICES = 0
-ALL_IPS_FOUND = []
+write_app = typer.Typer(
+    help="Write Modbus coils and holding registers.",
+    no_args_is_help=True,
+)
+
+app.add_typer(scan_app, name="scan")
+app.add_typer(write_app, name="write")
+
+DEFAULT_PORT = 502
+DEFAULT_TIMEOUT = 3.0
+NETWORK_SCAN_TIMEOUT = 0.5
 
 console = Console()
-
 nm = nmap.PortScanner()
 
-def list_network_interfaces():
-    addresses = psutil.net_if_addrs()
-    output = console or Console()
 
-    table = Table(
-        title=(
-            f"List of Network Interfaces: "
+# SHARED HELPERS
+
+def _render_write_result(
+    result: WriteResult,
+    target: TcpTarget,
+) -> None:
+    """render a Modbus write result."""
+
+    if result.ok:
+        console.print(
+            f"[green]Write successful[/green] "
+            f"on {target.host}:{target.port} "
+            f"(device {target.device_id})"
         )
+        return
+
+    console.print(
+        f"[red]Write failed[/red]: "
+        f"{result.error_kind}: {result.error}"
     )
-    table.add_column("Network Interface")
-    table.add_column("Address")
 
-    print("Which of the network interfaces do you want to scan: ")
-    for interface_name, interface_addr in addresses.items():
-        for address in interface_addr:
-            table.add_row(str(interface_name), str(address.address))
+    raise typer.Exit(code=3)
 
-    output.print(table)
+def _build_target(
+    host: str,
+    port: int,
+    device_id: int,
+    timeout: float,
+) -> TcpTarget:
+    """create and validate a Modbus TCP target."""
 
-def check_modbus_devices(ip, slave_id):
-    """checking Modbus devices on the network"""
+    try:
+        return TcpTarget(
+            host=host,
+            port=port,
+            device_id=device_id,
+            timeout=timeout,
+        )
 
-    global FOUND_MODBUS_DEVICES, ALL_IPS_FOUND
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
-    target = TcpTarget(
-                host=ip, 
-                port=PORT,
-                timeout=TIMEOUT, 
+def _build_scan_plan(
+    area: RegisterArea,
+    start: int,
+    count: int,
+    block_size: int,
+) -> ScanPlan:
+    """create and validate a scan plan."""
+
+    try:
+        return ScanPlan(
+            start=start,
+            count=count,
+            block_size=block_size,
+            area=area,
+        )
+
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+def _parse_coil_value(value: int) -> bool:
+    """Convert CLI coil value 0/1 into bool."""
+
+    if value == 0:
+        return False
+
+    if value == 1:
+        return True
+
+    raise typer.BadParameter(
+        "coil value must be 0 or 1"
+    )
+
+def _parse_coil_values(
+    values: str,
+) -> tuple[bool, ...]:
+    """Parse comma-separated CLI coil values."""
+
+    parts = [
+        value.strip()
+        for value in values.split(",")
+    ]
+
+    if not parts or any(not value for value in parts):
+        raise typer.BadParameter(
+            "coil values cannot be empty"
+        )
+
+    parsed: list[bool] = []
+
+    for value in parts:
+        if value == "0":
+            parsed.append(False)
+
+        elif value == "1":
+            parsed.append(True)
+
+        else:
+            raise typer.BadParameter(
+                f"invalid coil value {value!r}; "
+                "expected only 0 or 1"
             )
 
+    return tuple(parsed)
+
+def _parse_register_values(
+    values: str,
+) -> tuple[int, ...]:
+    """Parse comma-separated CLI register values."""
+
+    parts = [
+        value.strip()
+        for value in values.split(",")
+    ]
+
+    if not parts or any(not value for value in parts):
+        raise typer.BadParameter(
+            "register values cannot be empty"
+        )
+
+    parsed: list[int] = []
+
+    for value in parts:
+        try:
+            number = int(value)
+
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"invalid register value {value!r}"
+            ) from exc
+
+        if not 0 <= number <= 65_535:
+            raise typer.BadParameter(
+                f"register value {number} must be "
+                "between 0 and 65535"
+            )
+
+        parsed.append(number)
+
+    return tuple(parsed)
+
+
+# SCAN EXECUTION
+
+def _run_scan(
+    host: str,
+    port: int,
+    device_id: int,
+    timeout: float,
+    start: int,
+    count: int,
+    block_size: int,
+    area: RegisterArea,
+) -> None:
+    """Execute a Modbus data-area scan."""
+
+    target = _build_target(
+        host=host,
+        port=port,
+        device_id=device_id,
+        timeout=timeout,
+    )
+
+    plan = _build_scan_plan(
+        area=area,
+        start=start,
+        count=count,
+        block_size=block_size,
+    )
+
     transport = PymodbusTcpTransport(target)
-    
+    scanner = Scanner(transport, target)
+
     try:
-        connected = transport.connect()
-        print(f"[FOUND] \n IP Address: {ip} \n SLAVE  {slave_id}")
-        FOUND_MODBUS_DEVICES = FOUND_MODBUS_DEVICES + 1
-        ALL_IPS_FOUND.append(ip)
-        print(f"MODBUS DEVICES SO FAR \n")
-        for idx, dev in enumerate(ALL_IPS_FOUND):
-            print(f"{idx+1}: {ip}")
-            
+        transport.connect()
+        report = scanner.scan(plan)
 
-    except (ModbusException, ModScannerConnectionError) as exc:
-        # Instead of crashing, print a message and return None
-        console.print(f"[OFFLINE] {ip}:{PORT} - {exc}")
-        return None
+    except ModScannerConnectionError as exc:
+        console.print(
+            f"[red]Connection failed:[/red] {exc}"
+        )
+        raise typer.Exit(code=2) from exc
 
-    if not connected:
-        print("NO Modbus device")
-        return None
+    finally:
+        transport.close()
 
-    FOUND_MODBUS_DEVICES = FOUND_MODBUS_DEVICES + 1
-    response = transport.read_device_information(slave_id)
-    print(f"rseponse = {response}")
+    render_report(report, console)
 
 
-@app.command("scan-tcp")
-def scan_tcp(
-    host: str = typer.Argument(
+# WRITE EXECUTION
+
+def _write_single_coil(
+    target: TcpTarget,
+    address: int,
+    value: bool,
+) -> None:
+    """write one Modbus coil."""
+
+    transport = PymodbusTcpTransport(target)
+    writer = Writer(transport, target)
+
+    try:
+        transport.connect()
+
+        result = writer.write_coil(
+            address=address,
+            value=value,
+        )
+
+    except ModScannerConnectionError as exc:
+        console.print(
+            f"[red]Connection failed:[/red] {exc}"
+        )
+        raise typer.Exit(code=2) from exc
+
+    finally:
+        transport.close()
+
+    _render_write_result(result, target)
+
+def _write_multiple_coils(
+    target: TcpTarget,
+    address: int,
+    values: tuple[bool, ...],
+) -> None:
+    """write multiple Modbus coils."""
+
+    transport = PymodbusTcpTransport(target)
+    writer = Writer(transport, target)
+
+    try:
+        transport.connect()
+
+        result = writer.write_coils(
+            address=address,
+            values=values,
+        )
+
+    except ModScannerConnectionError as exc:
+        console.print(
+            f"[red]Connection failed:[/red] {exc}"
+        )
+        raise typer.Exit(code=2) from exc
+
+    finally:
+        transport.close()
+
+    _render_write_result(result, target)
+
+def _write_single_register(
+    target: TcpTarget,
+    address: int,
+    value: int,
+) -> None:
+    """write one Modbus holding register."""
+
+    transport = PymodbusTcpTransport(target)
+    writer = Writer(transport, target)
+
+    try:
+        transport.connect()
+
+        result = writer.write_register(
+            address=address,
+            value=value,
+        )
+
+    except ModScannerConnectionError as exc:
+        console.print(
+            f"[red]Connection failed:[/red] {exc}"
+        )
+        raise typer.Exit(code=2) from exc
+
+    finally:
+        transport.close()
+
+    _render_write_result(result, target)
+
+def _write_multiple_registers(
+    target: TcpTarget,
+    address: int,
+    values: tuple[int, ...],
+) -> None:
+    """write multiple Modbus holding registers."""
+
+    transport = PymodbusTcpTransport(target)
+    writer = Writer(transport, target)
+
+    try:
+        transport.connect()
+
+        result = writer.write_registers(
+            address=address,
+            values=values,
+        )
+
+    except ModScannerConnectionError as exc:
+        console.print(
+            f"[red]Connection failed:[/red] {exc}"
+        )
+        raise typer.Exit(code=2) from exc
+
+    finally:
+        transport.close()
+
+    _render_write_result(result, target)
+
+
+# SCAN COMMANDS
+
+@scan_app.command("coils")
+def scan_coils(
+    host: str = typer.Option(
         ...,
-        help="hostname or IP address of the Modbus TCP device.",
+        "--host",
+        "-H",
+        help="Modbus TCP hostname or IP address.",
     ),
     start: int = typer.Option(
         0,
@@ -108,7 +376,6 @@ def scan_tcp(
         "-s",
         min=0,
         max=65_535,
-        help="zero-based starting register address.",
     ),
     count: int = typer.Option(
         10,
@@ -116,170 +383,737 @@ def scan_tcp(
         "-c",
         min=1,
         max=65_536,
-        help="number of registers to scan.",
     ),
     device_id: int = typer.Option(
         1,
         "--device-id",
         "-d",
-        min=1,
+        min=0,
         max=247,
-        help="Modbus device identifier.",
     ),
     port: int = typer.Option(
-        502,
+        DEFAULT_PORT,
         "--port",
         "-p",
         min=1,
         max=65_535,
-        help="Modbus TCP port.",
     ),
     timeout: float = typer.Option(
-        3.0,
+        DEFAULT_TIMEOUT,
         "--timeout",
         min=0.1,
-        help="Request timeout in seconds.",
     ),
     block_size: int = typer.Option(
         125,
         "--block-size",
         min=1,
         max=125,
-        help="maximum registers requested per block.",
     ),
 ) -> None:
-    """scan a range of Modbus TCP holding registers."""
+    """Scan Modbus coils using FC01."""
 
-    try:
-        target = TcpTarget(
-            host=host,
-            port=port,
-            device_id=device_id,
-            timeout=timeout,
-        )
+    _run_scan(
+        host=host,
+        port=port,
+        device_id=device_id,
+        timeout=timeout,
+        start=start,
+        count=count,
+        block_size=block_size,
+        area=RegisterArea.COIL,
+    )
 
-        plan = ScanPlan(
-            start=start,
-            count=count,
-            block_size=block_size,
-        )
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc)) from exc
+@scan_app.command("discrete-inputs")
+def scan_discrete_inputs(
+    host: str = typer.Option(
+        ...,
+        "--host",
+        "-H",
+        help="Modbus TCP hostname or IP address.",
+    ),
+    start: int = typer.Option(
+        0,
+        "--start",
+        "-s",
+        min=0,
+        max=65_535,
+    ),
+    count: int = typer.Option(
+        10,
+        "--count",
+        "-c",
+        min=1,
+        max=65_536,
+    ),
+    device_id: int = typer.Option(
+        1,
+        "--device-id",
+        "-d",
+        min=0,
+        max=247,
+    ),
+    port: int = typer.Option(
+        DEFAULT_PORT,
+        "--port",
+        "-p",
+        min=1,
+        max=65_535,
+    ),
+    timeout: float = typer.Option(
+        DEFAULT_TIMEOUT,
+        "--timeout",
+        min=0.1,
+    ),
+    block_size: int = typer.Option(
+        125,
+        "--block-size",
+        min=1,
+        max=125,
+    ),
+) -> None:
+    """scan Modbus discrete inputs using FC02."""
+
+    _run_scan(
+        host=host,
+        port=port,
+        device_id=device_id,
+        timeout=timeout,
+        start=start,
+        count=count,
+        block_size=block_size,
+        area=RegisterArea.DISCRETE_INPUT,
+    )
+
+@scan_app.command("holding")
+def scan_holding_registers(
+    host: str = typer.Option(
+        ...,
+        "--host",
+        "-H",
+        help="Modbus TCP hostname or IP address.",
+    ),
+    start: int = typer.Option(
+        0,
+        "--start",
+        "-s",
+        min=0,
+        max=65_535,
+    ),
+    count: int = typer.Option(
+        10,
+        "--count",
+        "-c",
+        min=1,
+        max=65_536,
+    ),
+    device_id: int = typer.Option(
+        1,
+        "--device-id",
+        "-d",
+        min=0,
+        max=247,
+    ),
+    port: int = typer.Option(
+        DEFAULT_PORT,
+        "--port",
+        "-p",
+        min=1,
+        max=65_535,
+    ),
+    timeout: float = typer.Option(
+        DEFAULT_TIMEOUT,
+        "--timeout",
+        min=0.1,
+    ),
+    block_size: int = typer.Option(
+        125,
+        "--block-size",
+        min=1,
+        max=125,
+    ),
+) -> None:
+    """scan Modbus holding registers using FC03."""
+
+    _run_scan(
+        host=host,
+        port=port,
+        device_id=device_id,
+        timeout=timeout,
+        start=start,
+        count=count,
+        block_size=block_size,
+        area=RegisterArea.HOLDING_REGISTER,
+    )
+
+@scan_app.command("input")
+def scan_input_registers(
+    host: str = typer.Option(
+        ...,
+        "--host",
+        "-H",
+        help="Modbus TCP hostname or IP address.",
+    ),
+    start: int = typer.Option(
+        0,
+        "--start",
+        "-s",
+        min=0,
+        max=65_535,
+    ),
+    count: int = typer.Option(
+        10,
+        "--count",
+        "-c",
+        min=1,
+        max=65_536,
+    ),
+    device_id: int = typer.Option(
+        1,
+        "--device-id",
+        "-d",
+        min=0,
+        max=247,
+    ),
+    port: int = typer.Option(
+        DEFAULT_PORT,
+        "--port",
+        "-p",
+        min=1,
+        max=65_535,
+    ),
+    timeout: float = typer.Option(
+        DEFAULT_TIMEOUT,
+        "--timeout",
+        min=0.1,
+    ),
+    block_size: int = typer.Option(
+        125,
+        "--block-size",
+        min=1,
+        max=125,
+    ),
+) -> None:
+    """scan Modbus input registers using FC04."""
+
+    _run_scan(
+        host=host,
+        port=port,
+        device_id=device_id,
+        timeout=timeout,
+        start=start,
+        count=count,
+        block_size=block_size,
+        area=RegisterArea.INPUT_REGISTER,
+    )
+
+
+# WRITE COMMANDS
+
+@write_app.command("coil")
+def write_coil(
+    host: str = typer.Option(
+        ...,
+        "--host",
+        "-H",
+        help="Modbus TCP hostname or IP address.",
+    ),
+    address: int = typer.Option(
+        ...,
+        "--address",
+        "-a",
+        min=0,
+        max=65_535,
+    ),
+    value: int = typer.Option(
+        ...,
+        "--value",
+        "-v",
+        help="Coil value: 1=ON, 0=OFF.",
+    ),
+    device_id: int = typer.Option(
+        1,
+        "--device-id",
+        "-d",
+        min=0,
+        max=247,
+    ),
+    port: int = typer.Option(
+        DEFAULT_PORT,
+        "--port",
+        "-p",
+        min=1,
+        max=65_535,
+    ),
+    timeout: float = typer.Option(
+        DEFAULT_TIMEOUT,
+        "--timeout",
+        min=0.1,
+    ),
+) -> None:
+    """Write one Modbus coil using FC05."""
+
+    target = _build_target(
+        host=host,
+        port=port,
+        device_id=device_id,
+        timeout=timeout,
+    )
+
+    coil_value = _parse_coil_value(value)
+
+    _write_single_coil(
+        target=target,
+        address=address,
+        value=coil_value,
+    )
+
+@write_app.command("coils")
+def write_coils(
+    host: str = typer.Option(
+        ...,
+        "--host",
+        "-H",
+        help="Modbus TCP hostname or IP address.",
+    ),
+    address: int = typer.Option(
+        ...,
+        "--address",
+        "-a",
+        min=0,
+        max=65_535,
+    ),
+    values: str = typer.Option(
+        ...,
+        "--values",
+        "-v",
+        help="Comma-separated coil values, e.g. 1,0,1,0.",
+    ),
+    device_id: int = typer.Option(
+        1,
+        "--device-id",
+        "-d",
+        min=0,
+        max=247,
+    ),
+    port: int = typer.Option(
+        DEFAULT_PORT,
+        "--port",
+        "-p",
+        min=1,
+        max=65_535,
+    ),
+    timeout: float = typer.Option(
+        DEFAULT_TIMEOUT,
+        "--timeout",
+        min=0.1,
+    ),
+) -> None:
+    """write multiple Modbus coils using FC15."""
+
+    target = _build_target(
+        host=host,
+        port=port,
+        device_id=device_id,
+        timeout=timeout,
+    )
+
+    parsed_values = _parse_coil_values(values)
+
+    _write_multiple_coils(
+        target=target,
+        address=address,
+        values=parsed_values,
+    )
+
+@write_app.command("register")
+def write_register(
+    host: str = typer.Option(
+        ...,
+        "--host",
+        "-H",
+        help="Modbus TCP hostname or IP address.",
+    ),
+    address: int = typer.Option(
+        ...,
+        "--address",
+        "-a",
+        min=0,
+        max=65_535,
+    ),
+    value: int = typer.Option(
+        ...,
+        "--value",
+        "-v",
+        min=0,
+        max=65_535,
+    ),
+    device_id: int = typer.Option(
+        1,
+        "--device-id",
+        "-d",
+        min=0,
+        max=247,
+    ),
+    port: int = typer.Option(
+        DEFAULT_PORT,
+        "--port",
+        "-p",
+        min=1,
+        max=65_535,
+    ),
+    timeout: float = typer.Option(
+        DEFAULT_TIMEOUT,
+        "--timeout",
+        min=0.1,
+    ),
+) -> None:
+    """write one holding register using FC06."""
+
+    target = _build_target(
+        host=host,
+        port=port,
+        device_id=device_id,
+        timeout=timeout,
+    )
+
+    _write_single_register(
+        target=target,
+        address=address,
+        value=value,
+    )
+
+@write_app.command("registers")
+def write_registers(
+    host: str = typer.Option(
+        ...,
+        "--host",
+        "-H",
+        help="Modbus TCP hostname or IP address.",
+    ),
+    address: int = typer.Option(
+        ...,
+        "--address",
+        "-a",
+        min=0,
+        max=65_535,
+    ),
+    values: str = typer.Option(
+        ...,
+        "--values",
+        "-v",
+        help="Comma-separated register values.",
+    ),
+    device_id: int = typer.Option(
+        1,
+        "--device-id",
+        "-d",
+        min=0,
+        max=247,
+    ),
+    port: int = typer.Option(
+        DEFAULT_PORT,
+        "--port",
+        "-p",
+        min=1,
+        max=65_535,
+    ),
+    timeout: float = typer.Option(
+        DEFAULT_TIMEOUT,
+        "--timeout",
+        min=0.1,
+    ),
+) -> None:
+    """write multiple holding registers using FC16."""
+
+    target = _build_target(
+        host=host,
+        port=port,
+        device_id=device_id,
+        timeout=timeout,
+    )
+
+    parsed_values = _parse_register_values(values)
+
+    _write_multiple_registers(
+        target=target,
+        address=address,
+        values=parsed_values,
+    )
+
+
+# NETWORK DISCOVERY
+
+def list_network_interfaces() -> None:
+    """Display local network interfaces."""
+
+    addresses = psutil.net_if_addrs()
+
+    table = Table(
+        title="Network Interfaces"
+    )
+
+    table.add_column("Interface")
+    table.add_column("Address")
+
+    for interface_name, interface_addresses in addresses.items():
+        for address in interface_addresses:
+            table.add_row(
+                interface_name,
+                str(address.address),
+            )
+
+    console.print(table)
+
+def check_modbus_device(
+    ip: str,
+    device_id: int,
+    port: int,
+) -> str | None:
+    """check whether a host responds as a Modbus TCP device."""
+
+    target = TcpTarget(
+        host=ip,
+        port=port,
+        device_id=device_id,
+        timeout=NETWORK_SCAN_TIMEOUT,
+    )
 
     transport = PymodbusTcpTransport(target)
-    scanner = Scanner(transport, target)
 
     try:
         transport.connect()
-        report = scanner.scan_holding_registers(plan)
-    except ModScannerConnectionError as exc:
-        console.print(f"Connection failed: {exc}")
-        raise typer.Exit(code=2) from exc
+
+        information = transport.read_device_information(
+            device_id
+        )
+
+        return information or "Active Modbus Device"
+
+    except ModScannerConnectionError:
+        return None
+
     finally:
         transport.close()
-
-    render_report(report, console)
-
 
 @app.command("scan-network")
 def scan_network(
     subnet: str = typer.Option(
-        ..., 
+        ...,
         "--subnet",
-        help="subnet or IP range of your network Modbus interface. \n\n Example: modscanner scan-network --subnet 192.168.2.0/24",
+        help="Network to scan, e.g. 100.1.1.0/24.",
+    ),
+    port: int = typer.Option(
+        DEFAULT_PORT,
+        "--port",
+        "-p",
+        min=1,
+        max=65_535,
+    ),
+    device_id: int = typer.Option(
+        1,
+        "--device-id",
+        "-d",
+        min=0,
+        max=247,
     ),
     show_vendor: bool = typer.Option(
         False,
         "--show-vendor",
-        help="Enable root (sudo) privledge do discover MAC hardware vendor names.\n" \
-        "This allows you to see what ip belongs to what device/vendor name."
-    )
+        help="Attempt to show MAC vendor information.",
+    ),
 ) -> None:
-    """scan all the Modbus devices on the network"""
+    """discover Modbus TCP devices on a network."""
 
-    # checking root priv
-    if show_vendor is True:
-        if os.geteuid() != 0:
-            print("Relaunching with sudo to capture MAC address vendor name")
+    if show_vendor and os.geteuid() != 0:
+        console.print(
+            "Relaunching with sudo for MAC vendor discovery."
+        )
 
-            try:
-                os.execvp("sudo", ["sudo"] + sys.argv)
+        os.execvp(
+            "sudo",
+            ["sudo", *sys.argv],
+        )
 
-            except Exception as e:
-                print(f"Failed to elevate privledges: {e}")
-                sys.exit(1)
+    try:
+        network = ipaddress.ip_network(
+            subnet,
+            strict=False,
+        )
 
-    output = console or Console()
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"invalid subnet: {exc}"
+        ) from exc
+
+    list_network_interfaces()
 
     table = Table(
-        title=(
-            f"Modbus devices on netwrk: "
-        )
+        title=f"Modbus devices on {network}"
     )
+
     table.add_column("Address")
     table.add_column("Device Info")
-    table.add_column("Slave ID")
+    table.add_column("Device ID")
+    table.add_column("Vendor")
 
-    list_nrk_interfaces = list_network_interfaces()
-    
-    print(f"Starting Modbus scan on {subnet}....")
-    network = ipaddress.ip_network(subnet, strict=False)
+    console.print(
+        f"Scanning {network} on TCP port {port}..."
+    )
 
-    # skip netwrk and bradcast addresses fr standard subnets
-    hosts = list(network.hosts() if network.prefixlen < 31 else list(network))
+    found = 0
+
+    hosts = (
+        network.hosts()
+        if network.prefixlen < 31
+        else iter(network)
+    )
 
     for ip in hosts:
+        ip_string = str(ip)
 
-        ip_str = str(ip)
+        information = check_modbus_device(
+            ip=ip_string,
+            device_id=device_id,
+            port=port,
+        )
 
-        for slave_id in COMMON_SLAVE_IDS:
-            # device_info = check_modbus_devices_on_network(ip, slave_id)
-            device_info = check_modbus_devices(str(ip), slave_id)
-            print(f"device info = {device_info}")
-            print(f"[TOTAL MODBUS DEVICES: {FOUND_MODBUS_DEVICES}]")
+        if information is None:
+            continue
 
-        print(f"ALLL IPs = {set(ALL_IPS_FOUND)}")
-        if str(ip) in ALL_IPS_FOUND:
-            for ip in ALL_IPS_FOUND:
-                nm_scan = nm.scan(ip_str, arguments="-sn")
+        vendor = ""
+
+        if show_vendor:
+            try:
+                scan_result = nm.scan(
+                    ip_string,
+                    arguments="-sn",
+                )
+
+                raw_host_data: Any = (
+                    scan_result
+                    .get("scan", {})
+                    .get(ip_string, {})
+                )
+
+                host_data = cast(
+                    dict[str, Any],
+                    raw_host_data,
+                )
+
+                vendors = cast(
+                    dict[str, str],
+                    host_data.get("vendor", {}),
+                )
+
+                if vendors:
+                    vendor = next(
+                        iter(vendors.values())
+                    )
+
+            except (
+                PortScannerError,
+                PortScannerTimeout,
+            ):
+                vendor = "Unknown"
                 
-                vendor_name = "Unknown Vendor"
-        
-                if ip_str in nm_scan["scan"]:
-                    host_data = nm_scan["scan"][ip_str]
-        
-                    if "vendor" in host_data and host_data["vendor"]:
-                        vendor_name = list(host_data["vendor"].values())[0]
-                        # requires sudo to extract vendor name, ignnore
-                        print("vendor name", vendor_name)
+        try:
+            hostname = socket.gethostbyaddr(
+                ip_string
+            )[0]
 
-                    else:
-                        print("#" * 50)
-                        print("Use the example command below to get vendor name, passwrd required: \n")
-                        print("modscanner scan-network --subnet 172.16.2.0/24 --show-vendor")
-                        print("#" * 50)
+            if information == "Active Modbus Device":
+                information = hostname
 
-                try:
-                    h_name = socket.gethostbyaddr(ip)[0]
+        except socket.herror:
+            pass
 
-                except socket.herror:
-                    print(f"Could not resolve IP adddress")
+        table.add_row(
+            ip_string,
+            information,
+            str(device_id),
+            vendor,
+        )
 
-            table.add_row(
-                ip,
-                vendor_name,
-                str(slave_id)
-            )
+        found += 1
 
-        output.print(table)
+    console.print(table)
+    console.print(
+        f"Found {found} Modbus device(s)."
+    )
+
+
+# LEGACY COMPATIBILITY
+
+@app.command("scan-tcp")
+def scan_tcp(
+    host: str = typer.Argument(
+        ...,
+        help="Modbus TCP hostname or IP address.",
+    ),
+    start: int = typer.Option(
+        0,
+        "--start",
+        "-s",
+        min=0,
+        max=65_535,
+    ),
+    count: int = typer.Option(
+        10,
+        "--count",
+        "-c",
+        min=1,
+        max=65_536,
+    ),
+    device_id: int = typer.Option(
+        1,
+        "--device-id",
+        "-d",
+        min=0,
+        max=247,
+    ),
+    port: int = typer.Option(
+        DEFAULT_PORT,
+        "--port",
+        "-p",
+        min=1,
+        max=65_535,
+    ),
+    timeout: float = typer.Option(
+        DEFAULT_TIMEOUT,
+        "--timeout",
+        min=0.1,
+    ),
+    block_size: int = typer.Option(
+        125,
+        "--block-size",
+        min=1,
+        max=125,
+    ),
+) -> None:
+    """scan holding registers using the legacy command."""
+
+    _run_scan(
+        host=host,
+        port=port,
+        device_id=device_id,
+        timeout=timeout,
+        start=start,
+        count=count,
+        block_size=block_size,
+        area=RegisterArea.HOLDING_REGISTER,
+    )
+
 
 @app.command()
 def version() -> None:
-    """display the installed ModScanner version"""
+    """display the installed ModScanner version."""
 
     from modscanner import __version__
 
-    console.print(f"modscanner {__version__}")
+    console.print(
+        f"modscanner {__version__}"
+    )
+
 
 if __name__ == "__main__":
     app()

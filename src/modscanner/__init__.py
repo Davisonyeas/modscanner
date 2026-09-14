@@ -1,4 +1,4 @@
-"""modScanner public package interface"""
+"""ModScanner public package interface."""
 
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version
@@ -12,6 +12,7 @@ from modscanner.models import (
     TcpTarget,
 )
 from modscanner.scanner import Scanner
+from modscanner.writer import Writer
 
 try:
     __version__ = version("modscanner")
@@ -26,5 +27,6 @@ __all__ = [
     "ScanReport",
     "Scanner",
     "TcpTarget",
+    "Writer",
     "__version__",
 ]

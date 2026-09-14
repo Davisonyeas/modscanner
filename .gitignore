@@ -30,3 +30,7 @@ htmlcov/
 # os files
 .DS_Store
 Thumbs.db
+
+# docs
+docs/build/
+
