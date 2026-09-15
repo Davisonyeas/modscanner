@@ -11,14 +11,22 @@ import typer
 from nmap import PortScannerError, PortScannerTimeout
 from rich.console import Console
 from rich.table import Table
+# from rich.live import Live
 
 from modscanner.exceptions import ModScannerConnectionError
-from modscanner.models import RegisterArea, ScanPlan, TcpTarget
-from modscanner.reporters.console import render_report
+from modscanner.reporters.console import render_report, render_typed_report
 from modscanner.scanner import Scanner
 from modscanner.transports.base import WriteResult
 from modscanner.transports.pymodbus_transport import PymodbusTcpTransport
 from modscanner.writer import Writer
+from modscanner.models import (
+    DataType,
+    RegisterArea,
+    ScanPlan,
+    TcpTarget,
+    WordOrder,
+)
+from modscanner.decoder import registers_per_value
 
 app = typer.Typer(
     name="modscanner",
@@ -205,8 +213,19 @@ def _run_scan(
     count: int,
     block_size: int,
     area: RegisterArea,
+    data_type: DataType | None = None,
+    word_order: WordOrder = WordOrder.BIG,
 ) -> None:
-    """Execute a Modbus data-area scan."""
+    """execute a Modbus data-area scan."""
+
+    if data_type is not None:
+        width = registers_per_value(data_type)
+
+        if count % width != 0:
+            raise typer.BadParameter(
+                f"--count must be a multiple of {width} "
+                f"for --type {data_type.value}"
+            )
 
     target = _build_target(
         host=host,
@@ -238,7 +257,16 @@ def _run_scan(
     finally:
         transport.close()
 
-    render_report(report, console)
+    # render_report(report, console)
+    if data_type is None:
+        render_report(report, console)
+    else:
+        render_typed_report(
+            report,
+            data_type=data_type,
+            word_order=word_order,
+            console=console,
+        )
 
 
 # WRITE EXECUTION
@@ -531,6 +559,19 @@ def scan_holding_registers(
         min=1,
         max=125,
     ),
+    data_type: DataType | None = typer.Option(
+    None,
+    "--type",
+    help=(
+        "Interpret register values as "
+        "uint16, int16, uint32, int32, or float32."
+    ),  
+    ),
+    word_order: WordOrder = typer.Option(
+        WordOrder.BIG,
+        "--word-order",
+        help="Word order for multi-register values.",
+    ),
 ) -> None:
     """scan Modbus holding registers using FC03."""
 
@@ -543,6 +584,8 @@ def scan_holding_registers(
         count=count,
         block_size=block_size,
         area=RegisterArea.HOLDING_REGISTER,
+        data_type=data_type,
+        word_order=word_order
     )
 
 @scan_app.command("input")
@@ -592,18 +635,33 @@ def scan_input_registers(
         min=1,
         max=125,
     ),
+    data_type: DataType | None = typer.Option(
+    None,
+    "--type",
+    help=(
+        "Interpret register values as "
+        "uint16, int16, uint32, int32, or float32."
+    ),
+    ),
+    word_order: WordOrder = typer.Option(
+        WordOrder.BIG,
+        "--word-order",
+        help="Word order for multi-register values.",
+    ),
 ) -> None:
     """scan Modbus input registers using FC04."""
 
     _run_scan(
-        host=host,
-        port=port,
-        device_id=device_id,
-        timeout=timeout,
-        start=start,
-        count=count,
-        block_size=block_size,
-        area=RegisterArea.INPUT_REGISTER,
+    host=host,
+    port=port,
+    device_id=device_id,
+    timeout=timeout,
+    start=start,
+    count=count,
+    block_size=block_size,
+    area=RegisterArea.INPUT_REGISTER,
+    data_type=data_type,
+    word_order=word_order,
     )
 
 
@@ -948,7 +1006,8 @@ def scan_network(
     list_network_interfaces()
 
     table = Table(
-        title=f"Modbus devices on {network}"
+        # title=f"Modbus devices on {network}"
+        title = f"Modbus Devices Found on {network}"
     )
 
     table.add_column("Address")
@@ -969,6 +1028,7 @@ def scan_network(
     )
 
     for ip in hosts:
+        
         ip_string = str(ip)
 
         information = check_modbus_device(
@@ -978,7 +1038,11 @@ def scan_network(
         )
 
         if information is None:
-            continue
+                console.print(table)
+                console.print(
+                    f"Found {found} Modbus device(s)."
+                )
+                continue
 
         vendor = ""
 
@@ -1023,6 +1087,7 @@ def scan_network(
 
             if information == "Active Modbus Device":
                 information = hostname
+                # live.update(table)
 
         except socket.herror:
             pass
@@ -1036,10 +1101,10 @@ def scan_network(
 
         found += 1
 
-    console.print(table)
-    console.print(
-        f"Found {found} Modbus device(s)."
-    )
+        console.print(table)
+        console.print(
+            f"Found {found} Modbus device(s)."
+        )
 
 
 # LEGACY COMPATIBILITY
@@ -1102,7 +1167,6 @@ def scan_tcp(
         block_size=block_size,
         area=RegisterArea.HOLDING_REGISTER,
     )
-
 
 @app.command()
 def version() -> None:
