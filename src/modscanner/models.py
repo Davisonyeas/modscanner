@@ -3,6 +3,21 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
+class DataType(StrEnum):
+    """supported Modbus register interpretations."""
+
+    UINT16 = "uint16"
+    INT16 = "int16"
+    UINT32 = "uint32"
+    INT32 = "int32"
+    FLOAT32 = "float32"
+
+class WordOrder(StrEnum):
+    """word order for multi-register values."""
+
+    BIG = "big"
+    LITTLE = "little"
+
 class RegisterArea(StrEnum):
     """supported Modbus data areas"""
 
